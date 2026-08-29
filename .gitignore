@@ -1,0 +1,37 @@
+# ─── Python ───
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+
+# ─── Environment ───
+.env
+
+# ─── IDE ───
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ─── Project data ───
+data/
+chroma_db/
+*.wav
+*.mp3
+*.ogg
+*.flac
+
+# ─── Docker ───
+postgres_data/
+
+# ─── Evaluation outputs ───
+evaluation_results.json
+
+# ─── OS ───
+.DS_Store
+Thumbs.db

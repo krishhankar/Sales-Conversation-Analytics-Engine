@@ -1,0 +1,13 @@
+.git
+.gitignore
+.env
+.venv
+venv
+__pycache__
+*.md
+data/
+chroma_db/
+postgres_data/
+evaluation_results.json
+.vscode
+.idea
