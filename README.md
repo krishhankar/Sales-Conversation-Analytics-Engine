@@ -51,7 +51,7 @@ A FastAPI service that **transcribes**, **scores**, and **indexes** sales conver
 |---|---|---|---|
 | API Framework | FastAPI | ✅ OSS | Async, high-performance |
 | Pipeline | LangGraph | ✅ OSS | Stateful graph orchestration |
-| LLM | Groq API (`llama-3.1-8b-instant`) | ✅ Free tier | 30 RPM, no credit card |
+| LLM | Groq API (`openai/gpt-oss-20b`, with `qwen/qwen3.8-27b` fallback) | ✅ Free tier | no credit card, model availability can vary by account |
 | Transcription | faster-whisper (`base` model) | ✅ Local | CPU-compatible, ~140MB |
 | Vector Store | ChromaDB (embedded) | ✅ Local | PersistentClient, no server needed |
 | Embeddings | `all-MiniLM-L6-v2` | ✅ Local | Via `langchain-huggingface` |
@@ -108,6 +108,8 @@ curl http://localhost:8000/health
 # {"status":"healthy","service":"sales-conversation-analytics-engine"}
 ```
 
+Open the analytics dashboard at [http://localhost:8000/](http://localhost:8000/). It shows call totals, average score, outcome and language distributions, and provides semantic transcript search.
+
 ## API Endpoints
 
 ### POST /calls — Ingest a call
@@ -127,9 +129,10 @@ curl -X POST http://localhost:8000/calls \
 python scripts/generate_tts_samples.py
 
 # Upload audio
-curl -X POST http://localhost:8000/calls \
+curl -X POST http://localhost:8000/calls/audio \
   -F "audio=@data/sample_audio/en_sales_sample.mp3"
 ```
+Audio uploads use `POST /calls/audio` and are limited to 25 MiB. Empty uploads are rejected.
 
 **Response:**
 ```json
@@ -207,9 +210,9 @@ python scripts/generate_tts_samples.py
 
 Then upload each file:
 ```bash
-curl -X POST -F "audio=@data/sample_audio/en_sales_sample.mp3" http://localhost:8000/calls
-curl -X POST -F "audio=@data/sample_audio/hi_sales_sample.mp3" http://localhost:8000/calls
-curl -X POST -F "audio=@data/sample_audio/ta_sales_sample.mp3" http://localhost:8000/calls
+curl -X POST -F "audio=@data/sample_audio/en_sales_sample.mp3" http://localhost:8000/calls/audio
+curl -X POST -F "audio=@data/sample_audio/hi_sales_sample.mp3" http://localhost:8000/calls/audio
+curl -X POST -F "audio=@data/sample_audio/ta_sales_sample.mp3" http://localhost:8000/calls/audio
 ```
 
 > **Note:** For real multilingual audio, you can download clips from the [Mozilla Data Collective](https://datacollective.mozillafoundation.org/) (CC0, free). Run `python scripts/download_sample_audio.py` for instructions.
@@ -219,7 +222,8 @@ curl -X POST -F "audio=@data/sample_audio/ta_sales_sample.mp3" http://localhost:
 Run the scoring pipeline against labeled dataset outcomes:
 
 ```bash
-# Evaluate on 50 samples (respects Groq rate limits with backoff)
+# Evaluate a shuffled stream of 50 samples without downloading the full dataset.
+# Reports per-class precision/recall/F1, specificity, balanced accuracy, and MCC.
 python scripts/evaluate.py --sample-size 50 --delay 3
 
 # Results are saved to evaluation_results.json
@@ -234,7 +238,11 @@ EVALUATION RESULTS
   Accuracy:          72.0%
   Precision:         75.0%
   Recall:            68.0%
+  Specificity:       76.0%
+  Balanced accuracy: 72.0%
   F1 Score:          71.3%
+  Macro F1:          72.0%
+  MCC:               0.440
 ============================================================
 ```
 
@@ -247,6 +255,7 @@ Pre-populate the database for demo purposes:
 ```bash
 python scripts/seed_dataset.py --count 20 --delay 3
 ```
+The seeder streams only the requested number of rows instead of downloading the complete dataset first.
 
 ## Development
 
@@ -277,6 +286,7 @@ Sales-Conversation-Analytics-Engine/
 ├── app/
 │   ├── __init__.py
 │   ├── main.py              # FastAPI app entry point + lifespan
+│   ├── dashboard.html       # Lightweight analytics and semantic search UI
 │   ├── config.py             # Pydantic Settings (env vars)
 │   ├── schemas.py            # Pydantic models (rubric, CRM, API contracts)
 │   ├── graph.py              # LangGraph StateGraph pipeline definition

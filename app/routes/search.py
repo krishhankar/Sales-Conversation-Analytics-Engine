@@ -11,7 +11,7 @@ import logging
 from fastapi import APIRouter
 
 from app import cache, vectorstore
-from app.schemas import RubricScores, SearchRequest, SearchResponse, SearchResult
+from app.schemas import SearchRequest, SearchResponse, SearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +28,8 @@ async def semantic_search(request: SearchRequest):
     - "conversations with confirmed next steps"
     """
     # Check cache first
-    cached = await cache.get_cached_search(request.query)
-    if cached:
+    cached = await cache.get_cached_search(request.query, request.n_results)
+    if cached is not None:
         return SearchResponse(
             query=request.query,
             results=[SearchResult(**r) for r in cached],
@@ -44,25 +44,18 @@ async def semantic_search(request: SearchRequest):
 
     results = []
     for hit in raw_results:
-        # Try to reconstruct rubric scores from metadata if available
-        rubric = None
-        meta = hit.get("metadata", {})
-        if "overall_score" in meta:
-            # We only stored overall_score in metadata; for full rubric, we'd need DB lookup
-            rubric = None  # Partial data not worth returning
-
         results.append(
             SearchResult(
                 call_id=hit["call_id"],
                 excerpt=hit["excerpt"],
                 score=hit["score"],
-                rubric_scores=rubric,
             )
         )
 
     # Cache results
     await cache.cache_search(
         request.query,
+        request.n_results,
         [r.model_dump() for r in results],
     )
 

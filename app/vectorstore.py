@@ -11,6 +11,7 @@ from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 
 from app.config import settings
+from app.dependencies import get_embedding_model
 
 # ── Singletons (initialized once, reused across requests) ──
 
@@ -25,11 +26,7 @@ def get_embeddings() -> HuggingFaceEmbeddings:
     """Return the shared embedding model instance."""
     global _embeddings
     if _embeddings is None:
-        _embeddings = HuggingFaceEmbeddings(
-            model_name=settings.EMBEDDING_MODEL,
-            model_kwargs={"device": "cpu"},
-            encode_kwargs={"normalize_embeddings": True},
-        )
+        _embeddings = get_embedding_model()
     return _embeddings
 
 

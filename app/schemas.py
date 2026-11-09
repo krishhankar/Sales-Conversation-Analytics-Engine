@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -73,7 +75,7 @@ class CRMRecord(BaseModel):
         default=None,
         description="Any follow-up date or timeline mentioned (free text)",
     )
-    predicted_outcome: str = Field(
+    predicted_outcome: Literal["conversion", "no_conversion"] = Field(
         description="Predicted conversion outcome: 'conversion' or 'no_conversion'"
     )
     key_topics: list[str] = Field(
@@ -90,10 +92,20 @@ class CRMRecord(BaseModel):
 class TextIngestRequest(BaseModel):
     """Request body for ingesting a text transcript."""
 
+    model_config = ConfigDict(extra="forbid")
+
     transcript: str = Field(
         min_length=10,
         description="The full conversation transcript text to analyze",
     )
+
+    @field_validator("transcript")
+    @classmethod
+    def transcript_must_contain_text(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 10:
+            raise ValueError("Transcript must contain at least 10 non-whitespace characters")
+        return value
 
 
 class CallResponse(BaseModel):
@@ -123,6 +135,8 @@ class CallDetail(BaseModel):
 class SearchRequest(BaseModel):
     """Request body for semantic search."""
 
+    model_config = ConfigDict(extra="forbid")
+
     query: str = Field(
         min_length=3,
         description="Natural language search query",
@@ -133,6 +147,14 @@ class SearchRequest(BaseModel):
         le=50,
         description="Number of results to return",
     )
+
+    @field_validator("query")
+    @classmethod
+    def query_must_contain_text(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 3:
+            raise ValueError("Query must contain at least 3 non-whitespace characters")
+        return value
 
 
 class SearchResult(BaseModel):

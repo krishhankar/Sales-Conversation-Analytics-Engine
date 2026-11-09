@@ -65,21 +65,35 @@ def main():
     parser.add_argument("--delay", type=float, default=3.0, help="Delay between calls (seconds)")
     args = parser.parse_args()
 
-    logger.info("Loading dataset: DeepMostInnovations/saas-sales-conversations")
-    ds = load_dataset("DeepMostInnovations/saas-sales-conversations", split="train")
+    if args.count < 1:
+        parser.error("--count must be at least 1")
+    if args.delay < 0:
+        parser.error("--delay cannot be negative")
 
-    # Take a sample
-    sample = ds.select(range(min(args.count, len(ds))))
-    logger.info("Processing %d conversations...", len(sample))
+    logger.info("Loading dataset: DeepMostInnovations/saas-sales-conversations")
+    ds = load_dataset(
+        "DeepMostInnovations/saas-sales-conversations",
+        split="train",
+        streaming=True,
+    )
+    sample = ds.take(args.count)
+    logger.info("Processing up to %d conversations...", args.count)
 
     success_count = 0
+    processed_count = 0
     for i, row in enumerate(sample):
+        processed_count += 1
         transcript = row.get("full_text", "")
         if not transcript or len(transcript) < 50:
             logger.warning("Skipping row %d: transcript too short", i)
             continue
 
-        logger.info("Processing %d/%d (%.0f%%)", i + 1, len(sample), (i + 1) / len(sample) * 100)
+        logger.info(
+            "Processing %d/%d (%.0f%%)",
+            i + 1,
+            args.count,
+            (i + 1) / args.count * 100,
+        )
 
         result = run_with_retry(transcript)
         if result:
@@ -93,10 +107,10 @@ def main():
             logger.warning("  ✗ Failed to process row %d", i)
 
         # Respect rate limits
-        if i < len(sample) - 1:
+        if i < args.count - 1:
             time.sleep(args.delay)
 
-    logger.info("Seeding complete: %d/%d successful", success_count, len(sample))
+    logger.info("Seeding complete: %d/%d successful", success_count, processed_count)
 
 
 if __name__ == "__main__":

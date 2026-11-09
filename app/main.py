@@ -13,13 +13,17 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 
-from app.cache import close_redis
+from app.cache import close_redis, get_redis
 from app.db.engine import get_engine
 from app.db.models import Base
+from app.dependencies import get_whisper_model
 from app.routes import analytics, calls, search
+from app.vectorstore import get_chroma_client
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,6 +43,11 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables created / verified")
+
+    await get_redis()
+    get_chroma_client()
+    get_whisper_model()
+    logger.info("External dependencies initialized")
 
     yield
 
@@ -64,6 +73,14 @@ app = FastAPI(
 app.include_router(calls.router)
 app.include_router(search.router)
 app.include_router(analytics.router)
+
+_DASHBOARD_PATH = Path(__file__).with_name("dashboard.html")
+
+
+@app.get("/", include_in_schema=False)
+async def dashboard():
+    """Serve the lightweight analytics dashboard."""
+    return FileResponse(_DASHBOARD_PATH, media_type="text/html")
 
 
 @app.get("/health", tags=["system"])

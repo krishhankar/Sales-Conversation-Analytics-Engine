@@ -60,26 +60,29 @@ async def get_cached_call(call_id: str) -> dict | None:
     return None
 
 
-def _query_hash(query: str) -> str:
-    """Create a deterministic hash key for a search query."""
-    return hashlib.sha256(query.encode()).hexdigest()[:16]
+def _query_hash(query: str, n_results: int) -> str:
+    """Create a deterministic cache key for a search query and result limit."""
+    cache_input = f"{query.strip().casefold()}:{n_results}"
+    return hashlib.sha256(cache_input.encode()).hexdigest()[:16]
 
 
-async def cache_search(query: str, results: list[dict], ttl: int = 300) -> None:
+async def cache_search(
+    query: str, n_results: int, results: list[dict], ttl: int = 300
+) -> None:
     """Cache semantic search results for a query (default 5 min TTL)."""
     try:
         client = await get_redis()
-        key = f"search:{_query_hash(query)}"
+        key = f"search:{_query_hash(query, n_results)}"
         await client.setex(key, ttl, json.dumps(results))
     except Exception:
         logger.warning("Failed to cache search results", exc_info=True)
 
 
-async def get_cached_search(query: str) -> list[dict] | None:
+async def get_cached_search(query: str, n_results: int) -> list[dict] | None:
     """Retrieve cached search results, or None if not found / expired."""
     try:
         client = await get_redis()
-        key = f"search:{_query_hash(query)}"
+        key = f"search:{_query_hash(query, n_results)}"
         value = await client.get(key)
         if value:
             return json.loads(value)

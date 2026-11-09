@@ -8,6 +8,7 @@ langchain-groq>=0.3.8
 langchain-core>=0.3
 langgraph>=0.4
 langchain-huggingface>=0.1
+sentence-transformers>=3.0
 langchain-chroma>=0.2
 
 # ─── Transcription (local, free) ───

@@ -18,6 +18,7 @@ Requires:
 import argparse
 import json
 import logging
+import math
 import os
 import sys
 import time
@@ -122,12 +123,34 @@ def evaluate_single(
 
 
 def compute_metrics(actuals: list[int], predictions: list[int]) -> dict:
-    """Compute accuracy, precision, recall, F1 for binary classification."""
-    assert len(actuals) == len(predictions)
+    """Compute binary and per-class classification metrics."""
+    if len(actuals) != len(predictions):
+        raise ValueError("actuals and predictions must have equal lengths")
+    if any(value not in (0, 1) for value in [*actuals, *predictions]):
+        raise ValueError("actuals and predictions must contain only 0 or 1")
+
     n = len(actuals)
 
     if n == 0:
-        return {"accuracy": 0.0, "precision": 0.0, "recall": 0.0, "f1": 0.0, "n": 0}
+        return {
+            "accuracy": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "specificity": 0.0,
+            "balanced_accuracy": 0.0,
+            "f1": 0.0,
+            "macro_f1": 0.0,
+            "mcc": 0.0,
+            "n": 0,
+            "tp": 0,
+            "tn": 0,
+            "fp": 0,
+            "fn": 0,
+            "per_class": {
+                "no_conversion": {"precision": 0.0, "recall": 0.0, "f1": 0.0, "support": 0},
+                "conversion": {"precision": 0.0, "recall": 0.0, "f1": 0.0, "support": 0},
+            },
+        }
 
     tp = sum(1 for a, p in zip(actuals, predictions) if a == 1 and p == 1)
     tn = sum(1 for a, p in zip(actuals, predictions) if a == 0 and p == 0)
@@ -138,17 +161,46 @@ def compute_metrics(actuals: list[int], predictions: list[int]) -> dict:
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+
+    negative_precision = tn / (tn + fn) if (tn + fn) > 0 else 0.0
+    negative_recall = specificity
+    negative_f1 = (
+        2 * negative_precision * negative_recall / (negative_precision + negative_recall)
+        if (negative_precision + negative_recall) > 0
+        else 0.0
+    )
+    mcc_denominator = math.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+    mcc = ((tp * tn) - (fp * fn)) / mcc_denominator if mcc_denominator else 0.0
 
     return {
         "accuracy": round(accuracy, 4),
         "precision": round(precision, 4),
         "recall": round(recall, 4),
+        "specificity": round(specificity, 4),
+        "balanced_accuracy": round((recall + specificity) / 2, 4),
         "f1": round(f1, 4),
+        "macro_f1": round((negative_f1 + f1) / 2, 4),
+        "mcc": round(mcc, 4),
         "n": n,
         "tp": tp,
         "tn": tn,
         "fp": fp,
         "fn": fn,
+        "per_class": {
+            "no_conversion": {
+                "precision": round(negative_precision, 4),
+                "recall": round(negative_recall, 4),
+                "f1": round(negative_f1, 4),
+                "support": tn + fp,
+            },
+            "conversion": {
+                "precision": round(precision, 4),
+                "recall": round(recall, 4),
+                "f1": round(f1, 4),
+                "support": tp + fn,
+            },
+        },
     }
 
 
@@ -158,6 +210,11 @@ def main():
     parser.add_argument("--delay", type=float, default=3.0, help="Delay between API calls (seconds)")
     parser.add_argument("--output", type=str, default="evaluation_results.json", help="Output file")
     args = parser.parse_args()
+
+    if args.sample_size < 1:
+        parser.error("--sample-size must be at least 1")
+    if args.delay < 0:
+        parser.error("--delay cannot be negative")
 
     if not settings.GROQ_API_KEY:
         logger.error("GROQ_API_KEY not set. Add it to .env or environment.")
@@ -172,21 +229,34 @@ def main():
 
     # Load dataset
     logger.info("Loading dataset: DeepMostInnovations/saas-sales-conversations")
-    ds = load_dataset("DeepMostInnovations/saas-sales-conversations", split="train")
+    ds = load_dataset(
+        "DeepMostInnovations/saas-sales-conversations",
+        split="train",
+        streaming=True,
+    )
+    shuffle_buffer = max(25, min(500, args.sample_size * 2))
+    sample = ds.shuffle(seed=42, buffer_size=shuffle_buffer).take(
+        args.sample_size
+    )
 
-    # Take a balanced sample
-    sample_size = min(args.sample_size, len(ds))
-    sample = ds.shuffle(seed=42).select(range(sample_size))
-
-    logger.info("Evaluating %d conversations...", sample_size)
+    logger.info("Evaluating up to %d conversations...", args.sample_size)
 
     actuals = []
     predictions = []
     detailed_results = []
 
+    processed_count = 0
     for i, row in enumerate(sample):
+        processed_count += 1
         transcript = row.get("full_text", "")
-        actual_outcome = int(row.get("outcome", 0))
+        try:
+            actual_outcome = int(row.get("outcome"))
+        except (TypeError, ValueError):
+            logger.warning("Skipping row %d: invalid outcome label", i)
+            continue
+        if actual_outcome not in (0, 1):
+            logger.warning("Skipping row %d: invalid outcome label %r", i, actual_outcome)
+            continue
 
         if not transcript or len(transcript) < 50:
             logger.warning("Skipping row %d: transcript too short", i)
@@ -194,7 +264,10 @@ def main():
 
         logger.info(
             "Evaluating %d/%d (%.0f%%) — actual_outcome=%d",
-            i + 1, sample_size, (i + 1) / sample_size * 100, actual_outcome,
+            i + 1,
+            args.sample_size,
+            (i + 1) / args.sample_size * 100,
+            actual_outcome,
         )
 
         result = evaluate_single(llm, transcript)
@@ -223,7 +296,7 @@ def main():
             logger.warning("  Skipped (pipeline error)")
 
         # Respect rate limits
-        if i < sample_size - 1:
+        if i < args.sample_size - 1:
             time.sleep(args.delay)
 
     # Compute metrics
@@ -238,6 +311,10 @@ def main():
     print(f"  Precision:         {metrics['precision']:.1%}")
     print(f"  Recall:            {metrics['recall']:.1%}")
     print(f"  F1 Score:          {metrics['f1']:.1%}")
+    print(f"  Specificity:       {metrics['specificity']:.1%}")
+    print(f"  Balanced accuracy: {metrics['balanced_accuracy']:.1%}")
+    print(f"  Macro F1:          {metrics['macro_f1']:.1%}")
+    print(f"  MCC:               {metrics['mcc']:.3f}")
     print(f"  TP={metrics.get('tp', 0)} TN={metrics.get('tn', 0)} FP={metrics.get('fp', 0)} FN={metrics.get('fn', 0)}")
     print("=" * 60)
 
@@ -245,7 +322,8 @@ def main():
     output = {
         "metrics": metrics,
         "model": settings.GROQ_MODEL,
-        "sample_size": sample_size,
+        "sample_size": args.sample_size,
+        "processed": processed_count,
         "evaluated": len(actuals),
         "detailed_results": detailed_results,
     }

@@ -23,6 +23,7 @@ from app.schemas import CallDetail, CallResponse, CRMRecord, RubricScores, TextI
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/calls", tags=["calls"])
+MAX_AUDIO_BYTES = 25 * 1024 * 1024
 
 
 async def _run_pipeline(initial_state: dict) -> CallResponse:
@@ -71,9 +72,18 @@ async def ingest_audio(audio: UploadFile = File(...)):
     if not audio.filename:
         raise HTTPException(status_code=400, detail="No audio file provided.")
 
-    suffix = os.path.splitext(audio.filename)[1] or ".wav"
+    content = await audio.read(MAX_AUDIO_BYTES + 1)
+    if not content:
+        raise HTTPException(status_code=400, detail="The uploaded audio file is empty.")
+    if len(content) > MAX_AUDIO_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Audio file exceeds the {MAX_AUDIO_BYTES // (1024 * 1024)} MiB limit.",
+        )
+
+    extension = os.path.splitext(audio.filename)[1]
+    suffix = extension if extension[1:].isalnum() else ".audio"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        content = await audio.read()
         tmp.write(content)
         tmp_path = tmp.name
 

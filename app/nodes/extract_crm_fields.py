@@ -17,6 +17,33 @@ from app.schemas import CRMRecord
 
 logger = logging.getLogger(__name__)
 
+
+def _invoke_with_fallback(prompt: str) -> CRMRecord:
+    """Try the default Groq model and then the fallback model if needed."""
+    models = [settings.GROQ_MODEL, settings.GROQ_MODEL_FALLBACK]
+
+    for model_name in models:
+        try:
+            llm = ChatGroq(
+                api_key=settings.GROQ_API_KEY,
+                model=model_name,
+                temperature=0.1,
+            )
+            structured_llm = llm.with_structured_output(CRMRecord)
+            return structured_llm.invoke(prompt)
+        except Exception as exc:  # pragma: no cover - exercised via API access
+            if model_name != settings.GROQ_MODEL_FALLBACK:
+                logger.warning(
+                    "Groq model %s unavailable for CRM extraction; trying fallback %s",
+                    model_name,
+                    settings.GROQ_MODEL_FALLBACK,
+                    exc_info=True,
+                )
+                continue
+            raise RuntimeError(f"Groq extraction failed for all configured models: {exc}") from exc
+
+    raise RuntimeError("No Groq model was available for CRM extraction")
+
 EXTRACTION_PROMPT = """You are a CRM data extraction assistant for B2B SaaS sales teams.
 
 Extract structured CRM fields from the following sales conversation transcript.
@@ -55,14 +82,7 @@ def extract_crm_fields(state: dict[str, Any]) -> dict[str, Any]:
         truncated += "\n\n[... transcript truncated for extraction ...]"
 
     try:
-        llm = ChatGroq(
-            api_key=settings.GROQ_API_KEY,
-            model=settings.GROQ_MODEL,
-            temperature=0.1,
-        )
-        structured_llm = llm.with_structured_output(CRMRecord)
-
-        result: CRMRecord = structured_llm.invoke(
+        result: CRMRecord = _invoke_with_fallback(
             EXTRACTION_PROMPT.format(transcript=truncated)
         )
 

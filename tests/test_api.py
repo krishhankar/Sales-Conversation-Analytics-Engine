@@ -37,6 +37,11 @@ class TestHealthEndpoint:
         data = response.json()
         assert data["status"] == "healthy"
 
+    async def test_dashboard_is_served(self, async_client):
+        response = await async_client.get("/")
+        assert response.status_code == 200
+        assert "Sales Conversation Analytics" in response.text
+
 
 @pytest.mark.asyncio
 class TestCallsEndpoint:
@@ -63,6 +68,25 @@ class TestCallsEndpoint:
         """POST /calls with empty or invalid body should return 422."""
         response = await async_client.post("/calls", json={"transcript": "short"})
         assert response.status_code == 422  # min_length=10 validation
+
+    async def test_ingest_whitespace_transcript(self, async_client):
+        response = await async_client.post("/calls", json={"transcript": "          "})
+        assert response.status_code == 422
+
+    async def test_empty_audio_upload_is_rejected(self, async_client):
+        response = await async_client.post(
+            "/calls/audio",
+            files={"audio": ("empty.wav", b"", "audio/wav")},
+        )
+        assert response.status_code == 400
+
+    @patch("app.routes.calls.MAX_AUDIO_BYTES", 4)
+    async def test_oversized_audio_upload_is_rejected(self, async_client):
+        response = await async_client.post(
+            "/calls/audio",
+            files={"audio": ("large.wav", b"12345", "audio/wav")},
+        )
+        assert response.status_code == 413
 
     @patch("app.routes.calls.cache")
     @patch("app.routes.calls.get_call_record")
@@ -131,6 +155,20 @@ class TestSearchEndpoint:
         data = response.json()
         assert data["total"] == 1
         assert data["results"][0]["call_id"] == "test-uuid-1"
+        mock_cache.get_cached_search.assert_awaited_once_with("pricing objections", 5)
+        mock_cache.cache_search.assert_awaited_once()
+
+    @patch("app.routes.search.cache")
+    async def test_cached_empty_search_is_returned(self, mock_cache, async_client):
+        mock_cache.get_cached_search = AsyncMock(return_value=[])
+        response = await async_client.post("/search", json={"query": "pricing concerns"})
+        assert response.status_code == 200
+        assert response.json()["results"] == []
+        assert response.json()["total"] == 0
+
+    async def test_whitespace_search_query_is_rejected(self, async_client):
+        response = await async_client.post("/search", json={"query": "   "})
+        assert response.status_code == 422
 
 
 @pytest.mark.asyncio

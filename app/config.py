@@ -14,7 +14,8 @@ class Settings(BaseSettings):
 
     # ─── Groq API (free tier) ───
     GROQ_API_KEY: str = ""
-    GROQ_MODEL: str = "llama-3.1-8b-instant"
+    GROQ_MODEL: str = "openai/gpt-oss-20b"
+    GROQ_MODEL_FALLBACK: str = "qwen/qwen3.8-27b"
 
     # ─── Whisper ───
     WHISPER_MODEL_SIZE: str = "base"

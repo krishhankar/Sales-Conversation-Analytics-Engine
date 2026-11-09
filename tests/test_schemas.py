@@ -87,6 +87,14 @@ class TestTextIngestRequest:
         with pytest.raises(ValidationError):
             TextIngestRequest(transcript="Short")
 
+    def test_whitespace_only_content_is_rejected(self):
+        with pytest.raises(ValidationError):
+            TextIngestRequest(transcript="          ")
+
+    def test_unknown_request_fields_are_rejected(self):
+        with pytest.raises(ValidationError):
+            TextIngestRequest(transcript="A valid enough transcript.", transcrip="typo")
+
 
 class TestSearchRequest:
     """Tests for the search request model."""
@@ -103,6 +111,23 @@ class TestSearchRequest:
 
         with pytest.raises(ValidationError):
             SearchRequest(query="test query", n_results=100)
+
+    def test_whitespace_query_is_rejected(self):
+        with pytest.raises(ValidationError):
+            SearchRequest(query="   ")
+
+    def test_query_is_trimmed(self):
+        assert SearchRequest(query="  pricing discussions  ").query == "pricing discussions"
+
+
+class TestCRMRecordValidation:
+    def test_unknown_outcome_is_rejected(self):
+        with pytest.raises(ValidationError):
+            CRMRecord(
+                pricing_discussed=False,
+                next_steps_confirmed=False,
+                predicted_outcome="maybe",
+            )
 
 
 class TestAnalyticsSummary:

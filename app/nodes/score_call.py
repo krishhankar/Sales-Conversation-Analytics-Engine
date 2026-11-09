@@ -1,6 +1,6 @@
 """Score call node — evaluates a sales transcript against a rubric.
 
-Uses Groq free-tier LLM (llama-3.1-8b-instant) with structured output
+Uses a Groq free-tier LLM (default: openai/gpt-oss-20b, fallback: qwen/qwen3.8-27b) with structured output
 to produce a validated RubricScores Pydantic model. This is NOT free-text
 summarization — it's rubric-based evaluation with boolean + float fields.
 """
@@ -16,6 +16,35 @@ from app.config import settings
 from app.schemas import RubricScores
 
 logger = logging.getLogger(__name__)
+
+
+def _invoke_with_fallback(prompt: str) -> RubricScores:
+    """Try the default Groq model and then the fallback model if needed."""
+    models = [settings.GROQ_MODEL, settings.GROQ_MODEL_FALLBACK]
+    errors = []
+
+    for model_name in models:
+        try:
+            llm = ChatGroq(
+                api_key=settings.GROQ_API_KEY,
+                model=model_name,
+                temperature=0.1,
+            )
+            structured_llm = llm.with_structured_output(RubricScores)
+            return structured_llm.invoke(prompt)
+        except Exception as exc:  # pragma: no cover - exercised via API access
+            errors.append((model_name, exc))
+            if model_name != settings.GROQ_MODEL_FALLBACK:
+                logger.warning(
+                    "Groq model %s unavailable; trying fallback %s",
+                    model_name,
+                    settings.GROQ_MODEL_FALLBACK,
+                    exc_info=True,
+                )
+                continue
+            raise RuntimeError(f"Groq scoring failed for all configured models: {errors}") from exc
+
+    raise RuntimeError("No Groq model was available for scoring")
 
 SCORING_PROMPT = """You are an expert sales call evaluator for enterprise B2B SaaS sales.
 
@@ -55,14 +84,7 @@ def score_call(state: dict[str, Any]) -> dict[str, Any]:
         truncated += "\n\n[... transcript truncated for scoring ...]"
 
     try:
-        llm = ChatGroq(
-            api_key=settings.GROQ_API_KEY,
-            model=settings.GROQ_MODEL,
-            temperature=0.1,
-        )
-        structured_llm = llm.with_structured_output(RubricScores)
-
-        result: RubricScores = structured_llm.invoke(
+        result: RubricScores = _invoke_with_fallback(
             SCORING_PROMPT.format(transcript=truncated)
         )
 
