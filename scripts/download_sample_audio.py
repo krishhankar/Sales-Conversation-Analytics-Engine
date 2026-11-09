@@ -1,46 +1,53 @@
 #!/usr/bin/env python3
-"""Instructions for downloading Mozilla Common Voice audio clips.
+"""Download audio clips from direct URLs into data/sample_audio/."""
 
-As of 2026, Common Voice clips are exclusively hosted on the Mozilla Data
-Collective (MDC) portal. They are CC0-licensed and free, but require creating
-access credentials on the portal.
+from __future__ import annotations
 
-This script provides instructions — it does NOT auto-download.
-For an out-of-the-box demo without MDC signup, use generate_tts_samples.py instead.
-"""
+import shutil
+from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
+from urllib.request import urlopen
 
 
-def main():
-    print("=" * 70)
-    print("Mozilla Common Voice — Manual Download Instructions")
-    print("=" * 70)
-    print()
-    print("As of 2026, Common Voice clips are hosted exclusively on the")
-    print("Mozilla Data Collective portal.")
-    print()
-    print("Steps:")
-    print("  1. Visit: https://datacollective.mozillafoundation.org/")
-    print("  2. Create free access credentials (no payment required)")
-    print("  3. Search for your target languages (e.g., Tamil, Hindi, English)")
-    print("  4. Download a small subset of validated clips (5-10 per language)")
-    print("  5. Place the audio files in: data/sample_audio/")
-    print()
-    print("Recommended languages for multilingual demo:")
-    print("  - English (en)")
-    print("  - Hindi (hi)")
-    print("  - Tamil (ta)")
-    print()
-    print("File format: Common Voice clips are typically MP3.")
-    print("faster-whisper supports MP3, WAV, FLAC, and other formats.")
-    print()
-    print("License: CC0 (Public Domain) — free for any use.")
-    print()
-    print("-" * 70)
-    print("ALTERNATIVE: For a quick demo without MDC signup, run:")
-    print("  python scripts/generate_tts_samples.py")
-    print("This generates synthetic audio using gTTS (free, no API key).")
-    print("=" * 70)
+OUTPUT_DIR = Path(__file__).resolve().parent.parent / "data" / "sample_audio"
+
+# Add a filename and its direct download URL for each clip.
+# For example:
+# AUDIO_URLS = {
+#     "en_sample.mp3": "https://example.com/audio/en_sample.mp3",
+#     "hi_sample.mp3": "https://example.com/audio/hi_sample.mp3",
+# }
+AUDIO_URLS: dict[str, str] = {}
+
+
+def download_audio() -> None:
+    """Download each configured clip, reporting network and HTTP errors."""
+    if not AUDIO_URLS:
+        raise ValueError(
+            "Add one or more filename-to-URL entries to AUDIO_URLS before running."
+        )
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    for filename, url in AUDIO_URLS.items():
+        if Path(filename).name != filename or filename in {"", ".", ".."}:
+            raise ValueError(f"Invalid output filename: {filename!r}")
+
+        parsed_url = urlparse(url)
+        if parsed_url.scheme != "https" or not parsed_url.netloc:
+            raise ValueError(f"Use a valid HTTPS direct-download URL for {filename!r}.")
+
+        destination = OUTPUT_DIR / filename
+        try:
+            with urlopen(url, timeout=60) as response, destination.open("wb") as output:
+                shutil.copyfileobj(response, output)
+        except (HTTPError, URLError, TimeoutError, OSError) as exc:
+            destination.unlink(missing_ok=True)
+            raise RuntimeError(f"Could not download {filename!r}: {exc}") from exc
+
+        print(f"Downloaded {filename} ({destination.stat().st_size} bytes)")
 
 
 if __name__ == "__main__":
-    main()
+    download_audio()
